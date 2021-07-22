@@ -1,9 +1,59 @@
 <html>
     <body>
-        <ul>
+        Beste, <br/>
+        <br/>
+        Volgende agendapunten zijn mogelijk relevant voor u:
+
         {% for binding in data.results.bindings %}
-            <li> {{ binding.agendapuntTitel.value }} </li>
+            {% if binding.agendapuntExtern.value %}
+                <a href="{{binding.agendapuntExtern.value}}">
+            {% endif %}
+
+            {% if binding.agendapuntTitel %}
+                <h2> {{ binding.agendapuntTitel.value }} </h2>
+            {% else %}
+                <h2> <i> (Agendapunt zonder titel) </i> </h2>
+            {% endif %}
+
+            {% if binding.agendapuntExtern.value %}
+                </a>
+            {% endif %}
+
+
+            {# TODO: format dates #}
+
+            {% if binding.zittingStart %}
+                Zitting van {{ binding.zittingStart.value }} <br/>
+            {% elif binding.zittingGeplandeStart %}
+                Zitting gepland op {{ binding.zittingStart.value }} <br/>
+            {% endif %}
+
+            {% if binding.zittingNotulenExtern %}
+                Klik <a href="{{ binding.zittingNotulenExtern.value }}"> hier
+                </a> voor de notulen. <br/>
+            {% endif %}
+
+            {% if binding.stemmingGevolg or (
+                binding.stemmingAantalVoorstanders and
+                binding.stemmingAantalTegenstanders and
+                binding.stemmingAantalOnthouders
+            ) %}
+                Stemming: 
+                {% if binding.stemmingGevolg %}
+                    <b> {{binding.stemmingGevolg.value}} </b>
+                {% endif %}
+
+                {% if (
+                    binding.stemmingAantalVoorstanders and
+                    binding.stemmingAantalTegenstanders and
+                    binding.stemmingAantalOnthouders
+                ) %}
+                    (voor: {{binding.stemmingAantalVoorstanders.value}}, tegen:
+                    {{binding.stemmingAantalTegenstanders.value}}, onthouding:
+                    {{binding.stemmingAantalOnthouders.value}})
+                {% endif %}
+
+            {% endif%}
         {% endfor %}
-        </ul>
     </body>
 </html>
