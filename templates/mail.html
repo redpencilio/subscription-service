@@ -1,0 +1,9 @@
+<html>
+    <body>
+        <ul>
+        {% for binding in data.results.bindings %}
+            <li> {{ binding.agendapuntTitel.value }} </li>
+        {% endfor %}
+        </ul>
+    </body>
+</html>

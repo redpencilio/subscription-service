@@ -17,14 +17,14 @@ log_levels = {'DEBUG': logging.DEBUG,
               'WARNING': logging.WARNING,
               'ERROR': logging.ERROR,
               'CRITICAL': logging.CRITICAL}
-log_dir = '/logs'
-if not os.path.exists(log_dir):
-    os.makedirs(log_dir)
+LOG_DIR = '/logs'
+if not os.path.exists(LOG_DIR):
+    os.makedirs(LOG_DIR)
 thelogger = logging.getLogger('')
 thelogger.setLevel(
     log_levels.get(os.environ.get('LOG_LEVEL', 'INFO').upper(), logging.INFO)
 )
-fileHandler = logging.FileHandler("{0}/{1}.log".format(log_dir, 'logs'))
+fileHandler = logging.FileHandler("{0}/{1}.log".format(LOG_DIR, 'logs'))
 thelogger.addHandler(fileHandler)
 consoleHandler = logging.StreamHandler(stream=sys.stdout)
 thelogger.addHandler(consoleHandler)
