@@ -4,10 +4,12 @@ web.py: entry point of the service
 
 from __future__ import annotations
 
-from flask import Flask
-from jinja2 import Environment, select_autoescape, FileSystemLoader
+import time
 
-from helpers import query
+from flask import Flask
+from jinja2 import Environment, FileSystemLoader, select_autoescape
+
+from queries import get_agendapunten_data
 
 app = Flask(__name__)
 
@@ -18,68 +20,9 @@ def schedule() -> str:
 
     :returns: A response to this request
     """
-    data = query("""
-        PREFIX prov: <http://www.w3.org/ns/prov#>
-        PREFIX owl: <http://www.w3.org/2002/07/owl#>
-        PREFIX besluit: <http://data.vlaanderen.be/ns/besluit#>
-        PREFIX mandaat: <http://data.vlaanderen.be/ns/mandaat#>
-        PREFIX purl: <http://www.purl.org/>
-        PREFIX terms: <http://purl.org/dc/terms/>
-
-        SELECT DISTINCT
-          ?agendapuntTitel
-          ?agendapuntExtern
-          ?zittingExtern
-          ?zittingGeplandeStart
-          ?zittingStart
-          ?zittingEinde
-          ?zittingNotulenExtern
-          ?stemmingGevolg
-          ?stemmingAantalVoorstanders
-          ?stemmingAantalTegenstanders
-          ?stemmingAantalOnthouders
-        WHERE {
-          ?agendapunt a besluit:Agendapunt.
-          OPTIONAL {
-            ?agendapunt terms:title ?agendapuntTitel.
-          }
-          OPTIONAL {
-            ?agendapunt owl:sameAs ?agendapuntExtern.
-          }
-          OPTIONAL {
-            ?zitting besluit:behandelt ?agendapunt.
-            OPTIONAL {
-              ?zitting owl:sameAs ?zittingExtern. 
-            }
-            OPTIONAL {
-              ?zitting besluit:geplandeStart ?zittingGeplandeStart.
-            }
-            OPTIONAL {
-              ?zitting prov:endedAtTime ?zittingEinde.
-              ?zitting prov:startedAtTime ?zittingStart.
-            }
-            OPTIONAL {
-              ?zitting besluit:heeftNotulen ?zittingNotulen.
-              ?zittingNotulen owl:sameAs ?zittingNotulenExtern.
-            }
-          }
-          OPTIONAL {
-            ?behandeling terms:subject ?agendapunt.
-            OPTIONAL {
-              ?behandeling besluit:heeftStemming ?stemming.
-              OPTIONAL {
-                ?stemming besluit:gevolg ?stemmingGevolg.
-              }
-              OPTIONAL {
-                ?stemming besluit:aantalVoorstanders ?stemmingAantalVoorstanders.
-                ?stemming besluit:aantalTegenstanders ?stemmingAantalTegenstanders.
-                ?stemming besluit:aantalOnthouders ?stemmingAantalOnthouders.
-              }
-            }
-          }
-        }
-      LIMIT 50
-    """)
+    start_time = time.time_ns()
+    data = get_agendapunten_data()
+    print(f"Execution took {(time.time_ns() - start_time) / 1000000000} s")
 
     env = Environment(
         loader=FileSystemLoader("/app/templates"),

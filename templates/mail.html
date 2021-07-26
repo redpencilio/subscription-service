@@ -5,7 +5,7 @@
         Volgende agendapunten zijn mogelijk relevant voor u:
 
         {% for binding in data.results.bindings %}
-            {% if binding.agendapuntExtern.value %}
+            {% if binding.agendapuntExtern %}
                 <a href="{{binding.agendapuntExtern.value}}">
             {% endif %}
 
@@ -15,7 +15,7 @@
                 <h2> <i> (Agendapunt zonder titel) </i> </h2>
             {% endif %}
 
-            {% if binding.agendapuntExtern.value %}
+            {% if binding.agendapuntExtern %}
                 </a>
             {% endif %}
 
