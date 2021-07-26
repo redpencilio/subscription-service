@@ -3,6 +3,7 @@ queries: relevant SPARQL queries for this service
 """
 
 import typing
+import uuid
 
 from helpers import query, update
 
@@ -35,7 +36,7 @@ def send_mail(mail_html: str) -> typing.Any:
 
         INSERT DATA {{
           GRAPH <http://mu.semte.ch/graphs/system/email> {{
-            <http://{MAIL_URL_BASE}/emails/1> a nmo:Email;
+            <http://{MAIL_URL_BASE}/emails/{str(uuid.uuid4())}> a nmo:Email;
                 nmo:messageFrom "noreply@{MAIL_URL_BASE}";
                 nmo:emailTo "robbe@robbevanherck.be";
                 nmo:messageSubject "Nieuwe agendapunten beschikbaar";
