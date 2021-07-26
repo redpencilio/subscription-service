@@ -4,7 +4,47 @@ queries: relevant SPARQL queries for this service
 
 import typing
 
-from helpers import query
+from helpers import query, update
+
+MAIL_URL_BASE = "xxxparticipatie.redpencil.io"
+
+def escape(string: str) -> str:
+    """
+    escape: escape special characters in a string so it can be used as a SPARQL
+    object/subject.
+
+    :returns: the escaped string
+    """
+    return (
+        string.replace("\"", "\\\"")
+              .replace("\n", "\\n")
+              .replace("\t", "\\t")
+    )
+
+def send_mail(mail_html: str) -> typing.Any:
+    """
+    send_mail: send an email with the given html
+
+    :returns: the result
+    """
+
+    return update(f"""
+        PREFIX nmo: <http://www.semanticdesktop.org/ontologies/2007/03/22/nmo#>
+        PREFIX nie: <http://www.semanticdesktop.org/ontologies/2007/01/19/nie#>
+        PREFIX nfo: <http://www.semanticdesktop.org/ontologies/2007/03/22/nfo#>
+
+        INSERT DATA {{
+          GRAPH <http://mu.semte.ch/graphs/system/email> {{
+            <http://{MAIL_URL_BASE}/emails/1> a nmo:Email;
+                nmo:messageFrom "noreply@{MAIL_URL_BASE}";
+                nmo:emailTo "robbe@robbevanherck.be";
+                nmo:messageSubject "Nieuwe agendapunten beschikbaar";
+                nmo:htmlMessageContent "{escape(mail_html)}";
+                nmo:sentDate "";
+                nmo:isPartOf <http://{MAIL_URL_BASE}/id/mail-folders/2>.
+          }}
+        }}
+    """)
 
 def get_agendapunten_data() -> typing.Any:
     """
