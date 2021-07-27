@@ -6,11 +6,15 @@ https://github.com/MikiDi/mu-python-template/blob/development/helpers.py
 import logging
 import os
 import sys
+from typing import Union
 import uuid
 
 from SPARQLWrapper import JSON, SPARQLWrapper
 from flask import Response, jsonify
-
+from rdflib import Literal, URIRef, Graph
+from rdflib.namespace import Namespace, OWL, DCTERMS, PROV, SH
+BESLUIT = Namespace("http://data.vlaanderen.be/ns/besluit#")
+EXT = Namespace("http://mu.semte.ch/vocabularies/ext/")
 
 log_levels = {'DEBUG': logging.DEBUG,
               'INFO': logging.INFO,
@@ -53,30 +57,70 @@ def generate_uuid() -> uuid.UUID:
     """
     return uuid.uuid4()
 
-sparqlQuery = SPARQLWrapper(
-    os.environ.get('MU_SPARQL_ENDPOINT'),
+sparql = SPARQLWrapper(
+    endpoint=os.environ.get('MU_SPARQL_ENDPOINT'),
+    updateEndpoint=os.environ.get('MU_SPARQL_UPDATEPOINT'),
     returnFormat=JSON
 )
-sparqlUpdate = SPARQLWrapper(
-    os.environ.get('MU_SPARQL_UPDATEPOINT'),
-    returnFormat=JSON
-)
-sparqlUpdate.method = 'POST'
 
-def query(the_query):
+def query(the_query, method='GET') -> dict:
     """
-    Execute the given SPARQL query (select/ask/construct) on the triple store
+    query: Execute the given SPARQL query (select/ask/construct) on the triple
+    store
+
+    :returns: The result of the query
     """
     log("execute query: \n" + the_query)
-    sparqlQuery.setQuery(the_query)
-    return sparqlQuery.query().convert()
+    sparql.setQuery(the_query)
+    sparql.method = method
+    return sparql.queryAndConvert()  # type: ignore
 
 
-def update(the_query):
+def update(the_query, method='POST') -> dict:
     """
-    Execute the given update SPARQL query on the triple store, if the given
-    query is no update query, nothing happens.
+    update: Execute the given update SPARQL query on the triple store, if the
+    given query is no update query, nothing happens.
+
+    :returns: The result of the query
     """
-    sparqlUpdate.setQuery(the_query)
-    if sparqlUpdate.isSparqlUpdateRequest():
-        sparqlUpdate.query()
+    log("execute update: \n" + the_query)
+    sparql.setQuery(the_query)
+    sparql.method = method
+    if sparql.isSparqlUpdateRequest():
+        return sparql.queryAndConvert()  # type: ignore
+    return {}
+
+def result_to_rdflib(result: dict) -> Union[URIRef, Literal]:
+    """
+    result_to_rdflib: turn one value from a result into a rdflib value
+
+    :raises Exception: when the type is unknown
+    :returns: The rdflib value
+    """
+
+    if result["type"] == "literal":
+        return Literal(result["value"])
+    if result["type"] == "uri":
+        return URIRef(result["value"])
+    raise Exception(f"Invalid type {result['type']}")
+
+def graph_from_results(sparql_results: dict) -> Graph:
+    """
+    graph_from_results: given the results of a SPARQL query, construct a graph
+
+    :returns: the constructed graph
+    """
+    g = Graph()
+    for binding in sparql_results["results"]["bindings"]:
+        g.add((
+            result_to_rdflib(binding["s"]),
+            result_to_rdflib(binding["p"]),
+            result_to_rdflib(binding["o"])
+        ))
+    g.bind('owl',     OWL)
+    g.bind('besluit', BESLUIT)
+    g.bind('ext',     EXT)
+    g.bind('prov',    PROV)
+    g.bind('terms',   DCTERMS)
+    g.bind('sh',      SH)
+    return g

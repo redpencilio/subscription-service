@@ -9,8 +9,8 @@ docker build -t robbe7730/subscription-service . || exit 1
 
 pushd ../app-poc-participatie
 
-docker-compose stop -t 1 subscription
-docker-compose up --build -d subscription
-docker-compose start subscription
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.override.yml stop -t 1 subscription
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.override.yml up --build -d subscription
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.override.yml start subscription
 
 popd
