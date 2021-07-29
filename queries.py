@@ -35,7 +35,7 @@ def find_related_agendapunten(subject: str) -> typing.Set[str]:
         PREFIX besluit: <http://data.vlaanderen.be/ns/besluit#>
         PREFIX terms: <http://purl.org/dc/terms/>
 
-        SELECT
+        SELECT DISTINCT
             ?agendapunt
         WHERE {{
             BIND(<{subject}> as ?firstNode)
@@ -53,8 +53,6 @@ def find_related_agendapunten(subject: str) -> typing.Set[str]:
             }}
         }}
     """)
-
-    print(data)
 
     return set(
         binding["agendapunt"]["value"]

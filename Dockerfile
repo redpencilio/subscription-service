@@ -6,6 +6,15 @@ LABEL maintainer="robbe@robbevanherck.be"
 
 EXPOSE 80
 
+RUN apt-get update
+RUN apt-get -y install locales
+
+RUN sed -i '/nl_BE.UTF-8/s/^# //g' /etc/locale.gen && \
+    locale-gen
+ENV LANG nl_BE.UTF-8
+ENV LANGUAGE nl_BE:en
+ENV LC_ALL nl_BE.UTF-8
+
 ENV LOG_LEVEL info
 ENV MU_SPARQL_ENDPOINT 'http://db:8890/sparql'
 ENV MU_SPARQL_UPDATEPOINT 'http://db:8890/sparql'

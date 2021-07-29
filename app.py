@@ -2,7 +2,9 @@
 web.py: entry point of the service
 """
 
+from datetime import datetime
 from typing import Dict, List
+import locale
 
 from flask import Flask, Response, request
 from jinja2 import Environment, FileSystemLoader, select_autoescape
@@ -18,6 +20,8 @@ from queries import get_agendapunt
 from queries import get_filter
 from queries import send_mail
 from queries import find_related_agendapunten
+
+locale.setlocale(locale.LC_ALL, 'nl_BE.UTF-8')
 
 app = Flask(__name__)
 
@@ -82,20 +86,32 @@ def delta_notification() -> Response: # pylint: disable=too-many-branches
 
         if matches(new_agendapunt, user_filter):
             log("Match, notify user")
-            notify_user(intermediary, delta, URIRef(agendapunt_url))
+            notify_user(new_agendapunt, delta, URIRef(agendapunt_url))
         else:
             log("No match, reconstructing old data")
             old_agendapunt = add_partial_delta(intermediary, delta["deletes"])
 
             if matches(old_agendapunt, user_filter):
                 log("Old matched, notify user")
-                notify_user(intermediary, delta, URIRef(agendapunt_url))
+                notify_user(new_agendapunt, delta, URIRef(agendapunt_url))
             else:
                 log("No match")
 
     return Response("OK")
 
 #TODO: move some of these functions to helpers
+
+def format_date(string: str, include_time=False) -> str:
+    """
+    format_date: Format a date string to a presentable format
+
+    :returns: The date in a presentable format
+    """
+    date = datetime.fromisoformat(string.strip())
+
+    if include_time:
+        return date.strftime("%A %d %B %Y %H:%M")
+    return date.strftime("%A %d %B %Y")
 
 def remove_partial_delta(graph: Graph, change: List[dict]) -> Graph:
     """
@@ -197,22 +213,24 @@ def notify_user(agendapunt: Graph, delta: dict, agendapunt_uri: Node):
         zitting_notulen = None
 
     # Find Stemming
-    possible_stemming = list( # type: ignore
-        agendapunt[zitting:EXT.stemming:]
+    possible_stemmingen = list( # type: ignore
+        agendapunt[agendapunt_uri:EXT.stemming:]
     )
 
-    if len(possible_stemming) == 0:
+    if len(possible_stemmingen) == 0:
         stemming = None
-    elif len(possible_stemming) == 1:
-        stemming = possible_stemming[0]
+    elif len(possible_stemmingen) == 1:
+        stemming = possible_stemmingen[0]
     else:
         error("Agendapunt has multiple Stemmingen, this is not supported")
-        stemming = possible_stemming[0]
+        stemming = possible_stemmingen[0]
 
     env = Environment(
         loader=FileSystemLoader("/app/templates"),
         autoescape=select_autoescape()
     )
+
+    env.filters["format_date"] = format_date
 
     template = env.get_template("mail-delta.html")
 

@@ -38,19 +38,20 @@
         {{ render_delta(
             subject=agendapunt,
             predicate=OWL.sameAs,
-            unchanged_format="<a href=\"{}\">Externe link</a>",
-            deleted_format="<a href=\"{}\">Oude link</a>",
-            inserted_format="<a href=\"{}\">Nieuwe link</a>",
+            unchanged_format="<a href=\"{}\">Externe link</a><br>",
+            deleted_format="<a href=\"{}\">Oude link</a><br>",
+            inserted_format="<a href=\"{}\">Nieuwe link</a><br>",
             default_value=None
         ) }}
 
         {% if stemming %}
-            Stemming{{render_delta(
+            <h3> Stemming </h3>
+            {{render_delta(
                 stemming,
                 BESLUIT.gevolg,
                 default_value="",
-                all_format=" <b>{}</b>"
-            ) }}:
+                all_format="<b>{}</b>"
+            ) }}
             <ul>
                 <li> voor: {{render_delta(
                     stemming,
@@ -72,8 +73,10 @@
             zitting,
             PROV.startedAtTime,
             default_value=""
-        ) }} </h2>
-            Gepland op: {{ render_delta(zitting, BESLUIT.geplandeStart) }} <br>
+        ) | format_date }} </h2>
+            Gepland op:
+            {{ render_delta(zitting, BESLUIT.geplandeStart) |
+            format_date(include_time=True) }} <br>
             Locatie: {{ render_delta(zitting, PROV.atLocation) }} <br>
 
             {% if zitting_notulen %}
