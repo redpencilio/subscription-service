@@ -1,6 +1,6 @@
 # subscription-service
 
 Microservice that handles email subscriptions for
-[xxxparticipatie][xxxparticipatie].
+[LokaalBeslist.be][lokaalbeslist].
 
-[xxxparticipatie]: https://github.com/redpencilio/app-poc-participatie
+[lokaalbeslist]: https://github.com/redpencilio/app-poc-participatie

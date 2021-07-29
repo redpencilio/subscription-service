@@ -33,9 +33,18 @@ thelogger.addHandler(fileHandler)
 consoleHandler = logging.StreamHandler(stream=sys.stdout)
 thelogger.addHandler(consoleHandler)
 
+def debug(msg, *args, **kwargs):
+    """
+    debug: write a log message to the log file. Logs are written to the `/logs`
+    directory in the docker container.
+     """
+    thelogger.debug(msg, *args, **kwargs)
+
 def log(msg, *args, **kwargs):
-    """write a log message to the log file. Logs are written to the `/logs`
-     directory in the docker container."""
+    """
+    log: write a log message to the log file. Logs are written to the `/logs`
+    directory in the docker container.
+    """
     thelogger.info(msg, *args, **kwargs)
 
 def error(msg, status=400) -> Response:
@@ -63,7 +72,7 @@ sparql = SPARQLWrapper(
     returnFormat=JSON
 )
 
-def query(the_query, method='GET') -> dict:
+def query(the_query, method='GET', sudo=False) -> dict:
     """
     query: Execute the given SPARQL query (select/ask/construct) on the triple
     store
@@ -73,10 +82,11 @@ def query(the_query, method='GET') -> dict:
     log("execute query: \n" + the_query)
     sparql.setQuery(the_query)
     sparql.method = method
+    sparql.addCustomHttpHeader("mu-auth-sudo", str(sudo))
     return sparql.queryAndConvert()  # type: ignore
 
 
-def update(the_query, method='POST') -> dict:
+def update(the_query, method='POST', sudo=False) -> dict:
     """
     update: Execute the given update SPARQL query on the triple store, if the
     given query is no update query, nothing happens.
@@ -86,8 +96,10 @@ def update(the_query, method='POST') -> dict:
     log("execute update: \n" + the_query)
     sparql.setQuery(the_query)
     sparql.method = method
+    sparql.addCustomHttpHeader("mu-auth-sudo", str(sudo))
     if sparql.isSparqlUpdateRequest():
         return sparql.queryAndConvert()  # type: ignore
+    log("not executing")
     return {}
 
 def result_to_rdflib(result: dict) -> Union[URIRef, Literal]:

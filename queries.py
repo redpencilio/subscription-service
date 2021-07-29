@@ -9,7 +9,7 @@ from rdflib.graph import Graph
 
 from helpers import graph_from_results, query, update
 
-MAIL_URL_BASE = "xxxparticipatie.redpencil.io"
+MAIL_URL_BASE = "lokaalbeslist.be"
 
 def escape(string: str) -> str:
     """
@@ -24,13 +24,50 @@ def escape(string: str) -> str:
               .replace("\t", "\\t")
     )
 
+def find_related_agendapunten(subject: str) -> typing.Set[str]:
+    """
+    find_related_agendapunten: Find every Agendapunt URI related to the given
+    URI.
+
+    :returns: The (potentially empty) set of related Agendapunten
+    """
+    data = query(f"""
+        PREFIX besluit: <http://data.vlaanderen.be/ns/besluit#>
+        PREFIX terms: <http://purl.org/dc/terms/>
+
+        SELECT
+            ?agendapunt
+        WHERE {{
+            BIND(<{subject}> as ?firstNode)
+            ?agendapunt a besluit:Agendapunt.
+            {{
+                ?firstNode a besluit:Agendapunt.
+                BIND(?firstNode as ?agendapunt)
+            }} UNION {{
+                ?firstNode besluit:behandelt ?agendapunt.
+            }} UNION {{
+                ?firstNode terms:subject ?agendapunt.
+            }} UNION {{
+                ?behandeling terms:subject ?agendapunt.
+                ?behandeling besluit:heeftStemming ?firstNode.
+            }}
+        }}
+    """)
+
+    print(data)
+
+    return set(
+        binding["agendapunt"]["value"]
+        for binding in data["results"]["bindings"]
+    )
+
 def get_filter() -> Graph:
     """
     get_filter: get the shacl filters for the user
 
     :returns: the graph for use in validate
     """
-    FILTER = "ext:filter5"
+    FILTER = "ext:filter1"
     return graph_from_results(query(f"""
         PREFIX ext: <http://mu.semte.ch/vocabularies/ext/>
         PREFIX prov: <http://www.w3.org/ns/prov#>
@@ -56,7 +93,7 @@ def get_agendapunt(url: str) -> Graph:
 
     :returns: the graph with the relevant data
     """
-
+    # TODO: the modifications shouldn't be needed anymore
     return graph_from_results(query(f"""
         PREFIX ext: <http://mu.semte.ch/vocabularies/ext/>
         PREFIX prov: <http://www.w3.org/ns/prov#>
@@ -121,7 +158,7 @@ def get_agendapunt(url: str) -> Graph:
                 }}
             }}
         }}
-        LIMIT 50
+        LIMIT 1
     """))
 
 def send_mail(mail_html: str) -> typing.Any:
@@ -138,7 +175,7 @@ def send_mail(mail_html: str) -> typing.Any:
 
         INSERT DATA {{
           GRAPH <http://mu.semte.ch/graphs/system/email> {{
-            <http://{MAIL_URL_BASE}/emails/{str(uuid.uuid4())}> a nmo:Email;
+            <http://{MAIL_URL_BASE}/id/emails/{str(uuid.uuid4())}> a nmo:Email;
                 nmo:messageFrom "noreply@{MAIL_URL_BASE}";
                 nmo:emailTo "robbe@robbevanherck.be";
                 nmo:messageSubject "Nieuwe agendapunten beschikbaar";
@@ -175,7 +212,9 @@ def get_agendapunten_data() -> typing.Any:
           ?stemmingAantalOnthouders
         WHERE {
           ?agendapunt a besluit:Agendapunt.
-          ?agendapunt terms:title ?agendapuntTitel.
+          OPTIONAL {
+              ?agendapunt terms:title ?agendapuntTitel.
+          }
           OPTIONAL {
             ?agendapunt owl:sameAs ?agendapuntExtern.
           }
