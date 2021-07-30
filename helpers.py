@@ -1,115 +1,44 @@
 """
-helpers: Helpers module, based on
-https://github.com/MikiDi/mu-python-template/blob/development/helpers.py
+helpers: Module containing helper functions
 """
 
-import logging
-import os
-import sys
-from typing import Union
-import uuid
+from datetime import datetime
+from typing import Dict
+from typing import List
 
-from SPARQLWrapper import JSON, SPARQLWrapper
-from flask import Response, jsonify
-from rdflib import Literal, URIRef, Graph
-from rdflib.namespace import Namespace, OWL, DCTERMS, PROV, SH
+from rdflib import Graph, Literal, URIRef
+from rdflib.namespace import DCTERMS, Namespace, OWL, PROV, SH
+from rdflib.term import Node
+
 BESLUIT = Namespace("http://data.vlaanderen.be/ns/besluit#")
 EXT = Namespace("http://mu.semte.ch/vocabularies/ext/")
 
-log_levels = {'DEBUG': logging.DEBUG,
-              'INFO': logging.INFO,
-              'WARNING': logging.WARNING,
-              'ERROR': logging.ERROR,
-              'CRITICAL': logging.CRITICAL}
-LOG_DIR = '/logs'
-if not os.path.exists(LOG_DIR):
-    os.makedirs(LOG_DIR)
-thelogger = logging.getLogger('')
-thelogger.setLevel(
-    log_levels.get(os.environ.get('LOG_LEVEL', 'INFO').upper(), logging.INFO)
-)
-fileHandler = logging.FileHandler("{0}/{1}.log".format(LOG_DIR, 'logs'))
-thelogger.addHandler(fileHandler)
-consoleHandler = logging.StreamHandler(stream=sys.stdout)
-thelogger.addHandler(consoleHandler)
-
-def debug(msg, *args, **kwargs):
+def format_date(string: str, include_time: bool=False) -> str:
     """
-    debug: write a log message to the log file. Logs are written to the `/logs`
-    directory in the docker container.
-     """
-    thelogger.debug(msg, *args, **kwargs)
+    format_date: Format a date string to a presentable format.
 
-def log(msg, *args, **kwargs):
+    :param string: The date in string format.
+    :param include_time: Whether or not the time should be included.
+    :returns: The date in a presentable format or the string itself if it is not
+    in ISO format.
     """
-    log: write a log message to the log file. Logs are written to the `/logs`
-    directory in the docker container.
+    try:
+        date = datetime.fromisoformat(string.strip())
+    except ValueError:
+        return string
+
+    if include_time:
+        return date.strftime("%A %d %B %Y %H:%M")
+    return date.strftime("%A %d %B %Y")
+
+def result_to_rdflib(result: Dict) -> Node:
     """
-    thelogger.info(msg, *args, **kwargs)
+    result_to_rdflib: Turn one value from a SPARQL result into a rdflib Node.
 
-def error(msg, status=400) -> Response:
+    :param result: The value to convert.
+    :returns: The rdflib Node.
+    :raises Exception: When the type is unknown.
     """
-    error: Returns a JSON:API compliant error response with the given status
-    code (400 by default).
-
-    :returns: A JSON:API compliant Flask Response
-    """
-    response = jsonify({'message': msg})
-    response.status_code = status
-    return response
-
-def generate_uuid() -> uuid.UUID:
-    """
-    generate_uuid: Generates a UUIDv4
-
-    :returns: A UUID v4
-    """
-    return uuid.uuid4()
-
-sparql = SPARQLWrapper(
-    endpoint=os.environ.get('MU_SPARQL_ENDPOINT'),
-    updateEndpoint=os.environ.get('MU_SPARQL_UPDATEPOINT'),
-    returnFormat=JSON
-)
-
-def query(the_query, method='GET', sudo=False) -> dict:
-    """
-    query: Execute the given SPARQL query (select/ask/construct) on the triple
-    store
-
-    :returns: The result of the query
-    """
-    log("execute query: \n" + the_query)
-    sparql.setQuery(the_query)
-    sparql.method = method
-    sparql.addCustomHttpHeader("mu-auth-sudo", str(sudo))
-    return sparql.queryAndConvert()  # type: ignore
-
-
-def update(the_query, method='POST', sudo=False) -> dict:
-    """
-    update: Execute the given update SPARQL query on the triple store, if the
-    given query is no update query, nothing happens.
-
-    :returns: The result of the query
-    """
-    log("execute update: \n" + the_query)
-    sparql.setQuery(the_query)
-    sparql.method = method
-    sparql.addCustomHttpHeader("mu-auth-sudo", str(sudo))
-    if sparql.isSparqlUpdateRequest():
-        return sparql.queryAndConvert()  # type: ignore
-    log("not executing")
-    return {}
-
-def result_to_rdflib(result: dict) -> Union[URIRef, Literal]:
-    """
-    result_to_rdflib: turn one value from a result into a rdflib value
-
-    :raises Exception: when the type is unknown
-    :returns: The rdflib value
-    """
-
     if result["type"] == "literal":
         return Literal(result["value"])
     if result["type"] == "uri":
@@ -118,21 +47,89 @@ def result_to_rdflib(result: dict) -> Union[URIRef, Literal]:
 
 def graph_from_results(sparql_results: dict) -> Graph:
     """
-    graph_from_results: given the results of a SPARQL query, construct a graph
+    graph_from_results: Create an rdflib Graph from a SPARQL result.
 
-    :returns: the constructed graph
+    :param sparql_results: The SPARQL result.
+    :returns: The constructed graph.
     """
     g = Graph()
+
+    # Add the triples
     for binding in sparql_results["results"]["bindings"]:
         g.add((
             result_to_rdflib(binding["s"]),
             result_to_rdflib(binding["p"]),
             result_to_rdflib(binding["o"])
         ))
+
+    # Add some namespaces
     g.bind('owl',     OWL)
     g.bind('besluit', BESLUIT)
     g.bind('ext',     EXT)
     g.bind('prov',    PROV)
     g.bind('terms',   DCTERMS)
     g.bind('sh',      SH)
+
     return g
+
+def create_modified_graph(
+        graph: Graph,
+        change: List[Dict],
+        add: bool
+    ) -> Graph:
+    """
+    create_subgraph: Create a copy of the graph with the given change part ofthe
+    delta removed or added.
+
+    :param graph: The graph to copy and modify.
+    :param change: The set of triples to add or remove.
+    :param add: True if the change should be added, False if it should be
+    removed.
+    :returns: The new graph.
+    """
+    ret = copy_graph(graph)
+    for insert in change:
+        triple = (
+            result_to_rdflib(insert["subject"]),
+            result_to_rdflib(insert["predicate"]),
+            result_to_rdflib(insert["object"])
+        )
+        if add:
+            ret.add(triple)
+        else:
+            ret.remove(triple)
+    return ret
+
+def copy_graph(g: Graph) -> Graph:
+    """
+    copy_graph: Utility function to copy a graph.
+
+    :param g: The graph to copy.
+    :returns: A copy of the graph with the same triples and namespace bindings.
+    """
+    ret = Graph()
+
+    for (s, p, o) in g:
+        ret.add((s, p, o))
+
+    for (name, url) in g.namespaces():
+        ret.bind(name, url)
+
+    return ret
+
+def graph_from_partial_delta(changes: List[Dict]) -> Graph:
+    """
+    graph_from_partial_delta: Given the inserts or deletes of a delta, construct
+    the rdflib Graph with those triples.
+
+    :returns: The graph with the same triples as the partial delta.
+    """
+    ret = Graph()
+    for change in changes:
+        triple = (
+            result_to_rdflib(change["subject"]),
+            result_to_rdflib(change["predicate"]),
+            result_to_rdflib(change["object"])
+        )
+        ret.add(triple)
+    return ret

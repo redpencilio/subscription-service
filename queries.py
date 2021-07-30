@@ -2,21 +2,45 @@
 queries: relevant SPARQL queries for this service
 """
 
-import typing
+import os
 import uuid
+from typing import Tuple, Set, Dict
 
+from SPARQLWrapper import JSON, SPARQLWrapper
 from rdflib.graph import Graph
 
-from helpers import graph_from_results, query, update
+from helpers import graph_from_results
 
 MAIL_URL_BASE = "lokaalbeslist.be"
 
+sparql = SPARQLWrapper(
+    endpoint=os.environ.get('MU_SPARQL_ENDPOINT'),
+    updateEndpoint=os.environ.get('MU_SPARQL_UPDATEPOINT'),
+    returnFormat=JSON
+)
+
+def query(query_str: str, method: str='GET', sudo: bool=False) -> Dict:
+    """
+    query: Execute the given SPARQL query on the triple store.
+
+    :param query_str: The SPARQL query.
+    :param method: The HTTP method to use ('GET' for SELECT/CONSTRUCT/...,
+    'POST' for 'INSERT/DELETE/...').
+    :param sudo: Whether or not to use the mu-auth-sudo header.
+    :returns: The result of the query.
+    """
+    sparql.setQuery(query_str)
+    sparql.method = method
+    sparql.addCustomHttpHeader("mu-auth-sudo", str(sudo).lower())
+    return sparql.queryAndConvert() # type: ignore
+
 def escape(string: str) -> str:
     """
-    escape: escape special characters in a string so it can be used as a SPARQL
+    escape: Escape special characters in a string so it can be used as a SPARQL
     object/subject.
 
-    :returns: the escaped string
+    :param string: The string to escape.
+    :returns: The escaped string.
     """
     return (
         string.replace("\"", "\\\"")
@@ -24,11 +48,11 @@ def escape(string: str) -> str:
               .replace("\t", "\\t")
     )
 
-def get_user_data() -> typing.Set[typing.Tuple[Graph, str]]:
+def get_user_data() -> Set[Tuple[Graph, str]]:
     """
-    get_user_data: get all the user filters and corresponding email addresses
+    get_user_data: Get all the user filters and corresponding email addresses.
 
-    :returns: A set of (filter graph, email address)
+    :returns: A set of (filter graph, email address).
     """
     data = query("""
         PREFIX ext: <http://mu.semte.ch/vocabularies/ext/>
@@ -53,12 +77,12 @@ def get_user_data() -> typing.Set[typing.Tuple[Graph, str]]:
         for binding in data["results"]["bindings"]
     )
 
-def find_related_agendapunten(subject: str) -> typing.Set[str]:
+def find_related_agendapunten(subject: str) -> Set[str]:
     """
     find_related_agendapunten: Find every Agendapunt URI related to the given
     URI.
 
-    :returns: The (potentially empty) set of related Agendapunten
+    :returns: The (potentially empty) set of related Agendapunten.
     """
     data = query(f"""
         PREFIX besluit: <http://data.vlaanderen.be/ns/besluit#>
@@ -90,9 +114,10 @@ def find_related_agendapunten(subject: str) -> typing.Set[str]:
 
 def get_filter(url: str) -> Graph:
     """
-    get_filter: get the shacl filters for the user
+    get_filter: Get the shacl filter at the given URL.
 
-    :returns: the graph for use in validate
+    :param url: The URL to look up.
+    :returns: The rdflib Graph of the NodeShape.
     """
     return graph_from_results(query(f"""
         PREFIX ext: <http://mu.semte.ch/vocabularies/ext/>
@@ -114,12 +139,12 @@ def get_filter(url: str) -> Graph:
 
 def get_agendapunt(url: str) -> Graph:
     """
-    get_agendapunt: get all relevant data for a given URL. The URL can be a
-    besluit:Agendapunt, but can also be something else.
+    get_agendapunt: Get all relevant data for a given URL.
 
-    :returns: the graph with the relevant data
+    :param url: The URL to look up.
+    :returns: The graph with the relevant data.
     """
-    # TODO: the modifications shouldn't be needed anymore
+    # TODO: turn this into a simple CONSTRUCT WHERE
     return graph_from_results(query(f"""
         PREFIX ext: <http://mu.semte.ch/vocabularies/ext/>
         PREFIX prov: <http://www.w3.org/ns/prov#>
@@ -187,14 +212,15 @@ def get_agendapunt(url: str) -> Graph:
         LIMIT 1
     """))
 
-def send_mail(mail_html: str, email_address: str) -> typing.Any:
+def send_mail(mail_html: str, email_address: str):
     """
-    send_mail: send an email with the given html
+    send_mail: Queue an email to be sent with the given HTML content to the
+    given email address.
 
-    :returns: the result
+    :param mail_html: The HTML data to send.
+    :param email_address: The address to send the mail to.
     """
-
-    return update(f"""
+    query(f"""
         PREFIX nmo: <http://www.semanticdesktop.org/ontologies/2007/03/22/nmo#>
         PREFIX nie: <http://www.semanticdesktop.org/ontologies/2007/01/19/nie#>
         PREFIX nfo: <http://www.semanticdesktop.org/ontologies/2007/03/22/nfo#>
@@ -210,68 +236,4 @@ def send_mail(mail_html: str, email_address: str) -> typing.Any:
                 nmo:isPartOf <http://{MAIL_URL_BASE}/id/mail-folders/2>.
           }}
         }}
-    """)
-
-def get_agendapunten_data() -> typing.Any:
-    """
-    get_agendapunten_data: get the data relevant for all `besluit:Agendapunt`
-
-    :returns: the relevant data
-    """
-    return query("""
-        PREFIX prov: <http://www.w3.org/ns/prov#>
-        PREFIX owl: <http://www.w3.org/2002/07/owl#>
-        PREFIX besluit: <http://data.vlaanderen.be/ns/besluit#>
-        PREFIX purl: <http://www.purl.org/>
-        PREFIX terms: <http://purl.org/dc/terms/>
-
-        SELECT DISTINCT
-          ?agendapuntTitel
-          ?agendapuntExtern
-          ?zittingExtern
-          ?zittingStart
-          ?zittingGeplandeStart
-          ?zittingNotulenExtern
-          ?stemmingGevolg
-          ?stemmingAantalVoorstanders
-          ?stemmingAantalTegenstanders
-          ?stemmingAantalOnthouders
-        WHERE {
-          ?agendapunt a besluit:Agendapunt.
-          OPTIONAL {
-              ?agendapunt terms:title ?agendapuntTitel.
-          }
-          OPTIONAL {
-            ?agendapunt owl:sameAs ?agendapuntExtern.
-          }
-          OPTIONAL {
-            ?zitting besluit:behandelt ?agendapunt.
-            OPTIONAL {
-              ?zitting owl:sameAs ?zittingExtern. 
-            }
-            OPTIONAL {
-                ?zitting prov:startedAtTime ?zittingStart.
-            }
-            OPTIONAL {
-                ?zitting besluit:geplandeStart ?zittingStartGeplandeStart.
-            }
-            OPTIONAL {
-              ?zitting besluit:heeftNotulen ?zittingNotulen.
-              ?zittingNotulen owl:sameAs ?zittingNotulenExtern.
-            }
-          }
-          OPTIONAL {
-            ?behandeling terms:subject ?agendapunt.
-            ?behandeling besluit:heeftStemming ?stemming.
-            OPTIONAL {
-              ?stemming besluit:gevolg ?stemmingGevolg.
-            }
-            OPTIONAL {
-              ?stemming besluit:aantalVoorstanders ?stemmingAantalVoorstanders.
-              ?stemming besluit:aantalTegenstanders ?stemmingAantalTegenstanders.
-              ?stemming besluit:aantalOnthouders ?stemmingAantalOnthouders.
-            }
-          }
-        }
-      LIMIT 50
-    """)
+    """, 'POST')
