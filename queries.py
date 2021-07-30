@@ -24,6 +24,35 @@ def escape(string: str) -> str:
               .replace("\t", "\\t")
     )
 
+def get_user_data() -> typing.Set[typing.Tuple[Graph, str]]:
+    """
+    get_user_data: get all the user filters and corresponding email addresses
+
+    :returns: A set of (filter graph, email address)
+    """
+    data = query("""
+        PREFIX ext: <http://mu.semte.ch/vocabularies/ext/>
+        PREFIX schema: <http://schema.org/>
+
+        SELECT
+          ?email
+          ?filter_url
+        WHERE {
+          GRAPH <http://lokaalbeslist.be/graphs/subscriptions> {
+            ?user_url ext:hasSubscription ?filter_url;
+                      schema:email ?email.
+          }
+        }
+    """)
+
+    return set(
+        (
+            get_filter(binding["filter_url"]["value"]),
+            binding["email"]["value"]
+        )
+        for binding in data["results"]["bindings"]
+    )
+
 def find_related_agendapunten(subject: str) -> typing.Set[str]:
     """
     find_related_agendapunten: Find every Agendapunt URI related to the given
@@ -59,13 +88,12 @@ def find_related_agendapunten(subject: str) -> typing.Set[str]:
         for binding in data["results"]["bindings"]
     )
 
-def get_filter() -> Graph:
+def get_filter(url: str) -> Graph:
     """
     get_filter: get the shacl filters for the user
 
     :returns: the graph for use in validate
     """
-    FILTER = "ext:filter1"
     return graph_from_results(query(f"""
         PREFIX ext: <http://mu.semte.ch/vocabularies/ext/>
         PREFIX prov: <http://www.w3.org/ns/prov#>
@@ -77,7 +105,7 @@ def get_filter() -> Graph:
         CONSTRUCT  {{
           ?nextNode ?prop ?value.
         }} WHERE {{
-          BIND({FILTER} as ?nodeShape)
+          BIND(<{url}> as ?nodeShape)
           ?nodeShape a sh:NodeShape.
           ?nodeShape (sh:or|sh:and|sh:not|sh:xone|sh:property|rdf:first|rdf:rest)* ?nextNode.
           ?nextNode ?prop ?value.
@@ -159,7 +187,7 @@ def get_agendapunt(url: str) -> Graph:
         LIMIT 1
     """))
 
-def send_mail(mail_html: str) -> typing.Any:
+def send_mail(mail_html: str, email_address: str) -> typing.Any:
     """
     send_mail: send an email with the given html
 
@@ -175,7 +203,7 @@ def send_mail(mail_html: str) -> typing.Any:
           GRAPH <http://mu.semte.ch/graphs/system/email> {{
             <http://{MAIL_URL_BASE}/id/emails/{str(uuid.uuid4())}> a nmo:Email;
                 nmo:messageFrom "noreply@{MAIL_URL_BASE}";
-                nmo:emailTo "robbe@robbevanherck.be";
+                nmo:emailTo "{email_address}";
                 nmo:messageSubject "Nieuwe agendapunten beschikbaar";
                 nmo:htmlMessageContent "{escape(mail_html)}";
                 nmo:sentDate "";

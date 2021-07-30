@@ -15,9 +15,9 @@ from rdflib.graph import Graph
 from rdflib.namespace import DCTERMS
 from rdflib.term import Node
 
-from helpers import BESLUIT, EXT, PROV, error, log, result_to_rdflib
+from helpers import BESLUIT, EXT, PROV, log, result_to_rdflib
 from queries import get_agendapunt
-from queries import get_filter
+from queries import get_user_data
 from queries import send_mail
 from queries import find_related_agendapunten
 
@@ -40,13 +40,6 @@ def delta_notification() -> Response: # pylint: disable=too-many-branches
 
     # Get the inserts and deletes per subject
     subjects: Dict[str, Dict] = {}
-
-    # Get the filter for the user
-    user_filter = get_filter()
-
-    if len(user_filter) == 0: # type: ignore
-        error("No user filters found")
-        return Response("No user filters found", 200)
 
     for delta in data:
         for x in delta["inserts"]:
@@ -71,6 +64,8 @@ def delta_notification() -> Response: # pylint: disable=too-many-branches
                     }
                 subjects[related_agendapunt]["deletes"] += [x]
 
+    user_data = get_user_data()
+
     for agendapunt_url, delta in subjects.items():
         new_agendapunt = get_agendapunt(str(agendapunt_url))
 
@@ -84,18 +79,33 @@ def delta_notification() -> Response: # pylint: disable=too-many-branches
             delta["inserts"]
         )
 
-        if matches(new_agendapunt, user_filter):
-            log("Match, notify user")
-            notify_user(new_agendapunt, delta, URIRef(agendapunt_url))
-        else:
-            log("No match, reconstructing old data")
-            old_agendapunt = add_partial_delta(intermediary, delta["deletes"])
+        old_agendapunt = add_partial_delta(intermediary, delta["deletes"])
 
-            if matches(old_agendapunt, user_filter):
-                log("Old matched, notify user")
-                notify_user(new_agendapunt, delta, URIRef(agendapunt_url))
+        for user_filter, email in user_data:
+            if len(user_filter) == 0: # type: ignore
+                continue
+
+            if matches(new_agendapunt, user_filter):
+                log("Match, notify user")
+                notify_user(
+                    new_agendapunt,
+                    delta,
+                    URIRef(agendapunt_url),
+                    email
+                )
             else:
-                log("No match")
+                log("No match, reconstructing old data")
+
+                if matches(old_agendapunt, user_filter):
+                    log("Old matched, notify user")
+                    notify_user(
+                        new_agendapunt,
+                        delta,
+                        URIRef(agendapunt_url),
+                        email
+                    )
+                else:
+                    log("No match")
 
     return Response("OK")
 
@@ -107,7 +117,10 @@ def format_date(string: str, include_time=False) -> str:
 
     :returns: The date in a presentable format
     """
-    date = datetime.fromisoformat(string.strip())
+    try:
+        date = datetime.fromisoformat(string.strip())
+    except ValueError:
+        return string
 
     if include_time:
         return date.strftime("%A %d %B %Y %H:%M")
@@ -164,13 +177,19 @@ def graph_from_partial_delta(changes: List[Dict]) -> Graph:
         ret.add(triple)
     return ret
 
-def notify_user(agendapunt: Graph, delta: dict, agendapunt_uri: Node):
+def notify_user(
+        agendapunt: Graph,
+        delta: dict,
+        agendapunt_uri: Node,
+        email: str
+    ):
     """
     notify_user: Notify the user that a relevant Agendapunt has changed
 
     :param agendapunt: The current (after the delta) Agendapunt
     :param delta: The change that triggered this notification
     :param agendapunt_uri: The rdflib URI for the current Agendapunt
+    :param email: The email to which the rendered template needs to be sent
     """
     # Construct graphs
     unchanged = remove_partial_delta(
@@ -184,46 +203,22 @@ def notify_user(agendapunt: Graph, delta: dict, agendapunt_uri: Node):
     deletes = graph_from_partial_delta(delta["deletes"])
 
     # Find Zitting
-    possible_zittingen = list( # type: ignore
-        agendapunt[agendapunt_uri:EXT.zitting:]
+    zitting = next( # type: ignore
+        agendapunt[agendapunt_uri:EXT.zitting:], None
     )
-
-    if len(possible_zittingen) == 0:
-        zitting = None
-    elif len(possible_zittingen) == 1:
-        zitting = possible_zittingen[0]
-    else:
-        error("Agendapunt belongs to multiple zittingen, this is not supported")
-        zitting = possible_zittingen[0]
 
     # Find Notulen
     if zitting is not None:
-        possible_notulen = list( # type: ignore
-            agendapunt[zitting:BESLUIT.heeftNotulen:]
+        zitting_notulen = next( # type: ignore
+            agendapunt[zitting:BESLUIT.heeftNotulen:], None
         )
-
-        if len(possible_notulen) == 0:
-            zitting_notulen = None
-        elif len(possible_notulen) == 1:
-            zitting_notulen = possible_notulen[0]
-        else:
-            error("Zitting has multiple notulen, this is not supported")
-            zitting_notulen = possible_notulen[0]
     else:
         zitting_notulen = None
 
     # Find Stemming
-    possible_stemmingen = list( # type: ignore
-        agendapunt[agendapunt_uri:EXT.stemming:]
+    stemming = next( # type: ignore
+        agendapunt[agendapunt_uri:EXT.stemming:], None
     )
-
-    if len(possible_stemmingen) == 0:
-        stemming = None
-    elif len(possible_stemmingen) == 1:
-        stemming = possible_stemmingen[0]
-    else:
-        error("Agendapunt has multiple Stemmingen, this is not supported")
-        stemming = possible_stemmingen[0]
 
     env = Environment(
         loader=FileSystemLoader("/app/templates"),
@@ -253,7 +248,7 @@ def notify_user(agendapunt: Graph, delta: dict, agendapunt_uri: Node):
         BESLUIT=BESLUIT,
     )
 
-    send_mail(html)
+    send_mail(html, email)
 
 def copy_graph(g: Graph) -> Graph:
     """
