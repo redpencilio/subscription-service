@@ -78,8 +78,8 @@ def create_modified_graph(
         add: bool
     ) -> Graph:
     """
-    create_subgraph: Create a copy of the graph with the given change part ofthe
-    delta removed or added.
+    create_subgraph: Create a copy of the graph with the given change part of
+    the delta removed or added.
 
     :param graph: The graph to copy and modify.
     :param change: The set of triples to add or remove.

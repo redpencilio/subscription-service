@@ -7,17 +7,77 @@ import uuid
 from typing import Tuple, Set, Dict
 
 from SPARQLWrapper import JSON, SPARQLWrapper
-from rdflib.graph import Graph
+from rdflib import Graph
+from rdflib.term import Node
 
 from helpers import graph_from_results
 
-MAIL_URL_BASE = "lokaalbeslist.be"
+BASE_URL = os.environ["BASE_URL"]
 
 sparql = SPARQLWrapper(
     endpoint=os.environ.get('MU_SPARQL_ENDPOINT'),
-    updateEndpoint=os.environ.get('MU_SPARQL_UPDATEPOINT'),
     returnFormat=JSON
 )
+
+def read_query(path: str) -> str:
+    """
+    read_query: Read the query from a given file path.
+
+    :param path: The path of the query file.
+    :return: The query as a string.
+    """
+    with open(path, "r") as query_file:
+        return query_file.read()
+
+GET_RELEVANT_CONTENT_QUERY = read_query("/config/get_relevant_content.sparql")
+GET_TEMPLATE_SUBJECTS = read_query("/config/get_template_subjects.sparql")
+CONSTRUCT_CONTENT_QUERY = read_query("/config/construct_content.sparql")
+
+def get_content(url: str) -> Graph:
+    """
+    get_content: Get all relevant data for a given URL.
+
+    :param url: The URL to look up.
+    :returns: The graph with the relevant data.
+    """
+    return graph_from_results(query(
+        CONSTRUCT_CONTENT_QUERY.replace("CONTENT_URL", url)
+    ))
+
+def find_related_content(subject: str) -> Set[str]:
+    """
+    find_related_content: Find every URL with content related to the given URL.
+
+    :returns: The (potentially empty) set of related content.
+    """
+    data = query(
+        GET_RELEVANT_CONTENT_QUERY.replace("SUBJECT_URL", subject)
+    )
+
+    return set(
+        binding["content"]["value"]
+        for binding in data["results"]["bindings"]
+    )
+
+def get_template_subjects(content: Graph, content_url: Node) -> Dict[str, Node]:
+    """
+    get_template_subjects: Query the content for relevant URLs to pass to the
+    template.
+
+    :param content: The content that will be rendered.
+    :param content_url: The URL of the content itself.
+    :returns: A dict mapping names to their URI for use in the template.
+    """
+    query_str = GET_TEMPLATE_SUBJECTS.replace("CONTENT_URL", str(content_url))
+    bindings = content.query(query_str).bindings
+
+    if len(bindings) == 0:
+        return {}
+    ret = {}
+    for name, url in bindings[0].items():
+        ret[str(name)] = url
+    return ret
+
 
 def query(query_str: str, method: str='GET', sudo: bool=False) -> Dict:
     """
@@ -31,7 +91,8 @@ def query(query_str: str, method: str='GET', sudo: bool=False) -> Dict:
     """
     sparql.setQuery(query_str)
     sparql.method = method
-    sparql.addCustomHttpHeader("mu-auth-sudo", str(sudo).lower())
+    if sudo:
+        sparql.addCustomHttpHeader("mu-auth-sudo", "true")
     return sparql.queryAndConvert() # type: ignore
 
 def escape(string: str) -> str:
@@ -54,61 +115,26 @@ def get_user_data() -> Set[Tuple[Graph, str]]:
 
     :returns: A set of (filter graph, email address).
     """
-    data = query("""
+    data = query(f"""
         PREFIX ext: <http://mu.semte.ch/vocabularies/ext/>
         PREFIX schema: <http://schema.org/>
 
         SELECT
           ?email
           ?filter_url
-        WHERE {
-          GRAPH <http://lokaalbeslist.be/graphs/subscriptions> {
+        WHERE {{
+          GRAPH <{BASE_URL}/graphs/subscriptions> {{
             ?user_url ext:hasSubscription ?filter_url;
                       schema:email ?email.
-          }
-        }
-    """)
+          }}
+        }}
+    """, sudo=True)
 
     return set(
         (
             get_filter(binding["filter_url"]["value"]),
             binding["email"]["value"]
         )
-        for binding in data["results"]["bindings"]
-    )
-
-def find_related_agendapunten(subject: str) -> Set[str]:
-    """
-    find_related_agendapunten: Find every Agendapunt URI related to the given
-    URI.
-
-    :returns: The (potentially empty) set of related Agendapunten.
-    """
-    data = query(f"""
-        PREFIX besluit: <http://data.vlaanderen.be/ns/besluit#>
-        PREFIX terms: <http://purl.org/dc/terms/>
-
-        SELECT DISTINCT
-            ?agendapunt
-        WHERE {{
-            BIND(<{subject}> as ?firstNode)
-            ?agendapunt a besluit:Agendapunt.
-            {{
-                ?firstNode a besluit:Agendapunt.
-                BIND(?firstNode as ?agendapunt)
-            }} UNION {{
-                ?firstNode besluit:behandelt ?agendapunt.
-            }} UNION {{
-                ?firstNode terms:subject ?agendapunt.
-            }} UNION {{
-                ?behandeling terms:subject ?agendapunt.
-                ?behandeling besluit:heeftStemming ?firstNode.
-            }}
-        }}
-    """)
-
-    return set(
-        binding["agendapunt"]["value"]
         for binding in data["results"]["bindings"]
     )
 
@@ -120,97 +146,19 @@ def get_filter(url: str) -> Graph:
     :returns: The rdflib Graph of the NodeShape.
     """
     return graph_from_results(query(f"""
-        PREFIX ext: <http://mu.semte.ch/vocabularies/ext/>
-        PREFIX prov: <http://www.w3.org/ns/prov#>
-        PREFIX owl: <http://www.w3.org/2002/07/owl#>
-        PREFIX besluit: <http://data.vlaanderen.be/ns/besluit#>
-        PREFIX terms: <http://purl.org/dc/terms/>
         PREFIX sh: <http://www.w3.org/ns/shacl#>
 
         CONSTRUCT  {{
           ?nextNode ?prop ?value.
         }} WHERE {{
-          BIND(<{url}> as ?nodeShape)
-          ?nodeShape a sh:NodeShape.
-          ?nodeShape (sh:or|sh:and|sh:not|sh:xone|sh:property|rdf:first|rdf:rest)* ?nextNode.
-          ?nextNode ?prop ?value.
+          GRAPH <{BASE_URL}/graphs/subscriptions> {{
+            BIND(<{url}> as ?nodeShape)
+            ?nodeShape a sh:NodeShape.
+            ?nodeShape (sh:or|sh:and|sh:not|sh:xone|sh:property|rdf:first|rdf:rest)* ?nextNode.
+            ?nextNode ?prop ?value.
+          }}
         }}
-    """))
-
-def get_agendapunt(url: str) -> Graph:
-    """
-    get_agendapunt: Get all relevant data for a given URL.
-
-    :param url: The URL to look up.
-    :returns: The graph with the relevant data.
-    """
-    # TODO: turn this into a simple CONSTRUCT WHERE
-    return graph_from_results(query(f"""
-        PREFIX ext: <http://mu.semte.ch/vocabularies/ext/>
-        PREFIX prov: <http://www.w3.org/ns/prov#>
-        PREFIX owl: <http://www.w3.org/2002/07/owl#>
-        PREFIX besluit: <http://data.vlaanderen.be/ns/besluit#>
-        PREFIX terms: <http://purl.org/dc/terms/>
-
-        CONSTRUCT {{
-            ?agendapunt     a besluit:Agendapunt;
-                            terms:title ?agendapuntTitel;
-                            owl:sameAs ?agendapuntExtern;
-                            ext:zitting ?zitting;
-                            ext:stemming ?stemming.
-
-            ?zitting        a besluit:Zitting;
-                            owl:sameAs ?zittingExtern;
-                            prov:startedAtTime ?zittingStart;
-                            besluit:geplandeStart ?zittingStartGeplandeStart;
-                            besluit:heeftNotulen ?zittingNotulen.
-
-            ?zittingNotulen a besluit:Notulen;
-                            owl:sameAs ?zittingNotulenExtern.
-            
-            ?stemming       a besluit:Stemming;
-                            besluit:gevolg ?stemmingGevolg;
-                            besluit:aantalVoorstanders ?stemmingAantalVoorstanders;
-                            besluit:aantalTegenstanders ?stemmingAantalTegenstanders;
-                            besluit:aantalOnthouders ?stemmingAantalOnthouders.
-        }} WHERE {{
-            BIND(<{url}> as ?agendapunt)
-            ?agendapunt a besluit:Agendapunt.
-            ?agendapunt terms:title ?agendapuntTitel.
-            OPTIONAL {{
-                ?agendapunt owl:sameAs ?agendapuntExtern.
-            }}
-            OPTIONAL {{
-                ?zitting besluit:behandelt ?agendapunt.
-                OPTIONAL {{
-                    ?zitting owl:sameAs ?zittingExtern. 
-                }}
-                OPTIONAL {{
-                    ?zitting prov:startedAtTime ?zittingStart.
-                }}
-                OPTIONAL {{
-                    ?zitting besluit:geplandeStart ?zittingStartGeplandeStart.
-                }}
-                OPTIONAL {{
-                    ?zitting besluit:heeftNotulen ?zittingNotulen.
-                    ?zittingNotulen owl:sameAs ?zittingNotulenExtern.
-                }}
-            }}
-            OPTIONAL {{
-                ?behandeling terms:subject ?agendapunt.
-                ?behandeling besluit:heeftStemming ?stemming.
-                OPTIONAL {{
-                    ?stemming besluit:gevolg ?stemmingGevolg.
-                }}
-                OPTIONAL {{
-                    ?stemming besluit:aantalVoorstanders ?stemmingAantalVoorstanders.
-                    ?stemming besluit:aantalTegenstanders ?stemmingAantalTegenstanders.
-                    ?stemming besluit:aantalOnthouders ?stemmingAantalOnthouders.
-                }}
-            }}
-        }}
-        LIMIT 1
-    """))
+    """, sudo=True))
 
 def send_mail(mail_html: str, email_address: str):
     """
@@ -226,14 +174,14 @@ def send_mail(mail_html: str, email_address: str):
         PREFIX nfo: <http://www.semanticdesktop.org/ontologies/2007/03/22/nfo#>
 
         INSERT DATA {{
-          GRAPH <http://mu.semte.ch/graphs/system/email> {{
-            <http://{MAIL_URL_BASE}/id/emails/{str(uuid.uuid4())}> a nmo:Email;
-                nmo:messageFrom "noreply@{MAIL_URL_BASE}";
+          GRAPH <{BASE_URL}/graphs/system/email> {{
+            <{BASE_URL}/id/emails/{str(uuid.uuid4())}> a nmo:Email;
+                nmo:messageFrom "{os.environ["EMAIL_FROM"]}";
                 nmo:emailTo "{email_address}";
-                nmo:messageSubject "Nieuwe agendapunten beschikbaar";
+                nmo:messageSubject "{os.environ["EMAIL_SUBJECT"]}";
                 nmo:htmlMessageContent "{escape(mail_html)}";
                 nmo:sentDate "";
-                nmo:isPartOf <http://{MAIL_URL_BASE}/id/mail-folders/2>.
+                nmo:isPartOf <{BASE_URL}/id/mail-folders/2>.
           }}
         }}
-    """, 'POST')
+    """, 'POST', sudo=True)
