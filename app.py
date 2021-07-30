@@ -168,7 +168,7 @@ def notify_user(
 
     # Set up Jinja environment
     env = Environment(
-        loader=FileSystemLoader("/app/templates"),
+        loader=FileSystemLoader("/config/templates"),
         autoescape=select_autoescape()
     )
     template = env.get_template("mail-delta.html")

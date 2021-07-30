@@ -27,8 +27,6 @@ ADD requirements.txt /app/
 
 RUN cd /app && pip install -r requirements.txt
 
-ADD templates /app/templates
-
 ADD *.py /app/
 
 CMD FLASK_APP=app python -m flask run --host=0.0.0.0 --port=80
