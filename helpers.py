@@ -133,3 +133,18 @@ def graph_from_partial_delta(changes: List[Dict]) -> Graph:
         )
         ret.add(triple)
     return ret
+
+def escape_sparql_string(string: str) -> str:
+    """
+    escape_sparql_string: Escape special characters in a string.
+
+    :param string: The string to escape.
+    :returns: The escaped string.
+    """
+    return (
+        string.replace("\\", "\\\\")
+              .replace("'", "\\'")
+              .replace('"', '\\"')
+              .replace("\n", "\\n")
+              .replace("\t", "\\t")
+    )

@@ -11,6 +11,7 @@ from rdflib import Graph
 from rdflib.term import Node
 
 from helpers import graph_from_results
+from helpers import escape_sparql_string
 
 BASE_URL = os.environ["BASE_URL"]
 
@@ -41,7 +42,10 @@ def get_content(url: str) -> Graph:
     :returns: The graph with the relevant data.
     """
     return graph_from_results(query(
-        CONSTRUCT_CONTENT_QUERY.replace("CONTENT_URL", url)
+        CONSTRUCT_CONTENT_QUERY.replace(
+            "CONTENT_URL",
+            escape_sparql_string(url)
+        )
     ))
 
 def find_related_content(subject: str) -> Set[str]:
@@ -51,7 +55,10 @@ def find_related_content(subject: str) -> Set[str]:
     :returns: The (potentially empty) set of related content.
     """
     data = query(
-        GET_RELEVANT_CONTENT_QUERY.replace("SUBJECT_URL", subject)
+        GET_RELEVANT_CONTENT_QUERY.replace(
+            "SUBJECT_URL",
+            escape_sparql_string(subject)
+        )
     )
 
     return set(
@@ -68,7 +75,10 @@ def get_template_subjects(content: Graph, content_url: Node) -> Dict[str, Node]:
     :param content_url: The URL of the content itself.
     :returns: A dict mapping names to their URI for use in the template.
     """
-    query_str = GET_TEMPLATE_SUBJECTS.replace("CONTENT_URL", str(content_url))
+    query_str = GET_TEMPLATE_SUBJECTS.replace(
+        "CONTENT_URL",
+        escape_sparql_string(str(content_url))
+    )
     bindings = content.query(query_str).bindings
 
     if len(bindings) == 0:
@@ -94,20 +104,6 @@ def query(query_str: str, method: str='GET', sudo: bool=False) -> Dict:
     if sudo:
         sparql.addCustomHttpHeader("mu-auth-sudo", "true")
     return sparql.queryAndConvert() # type: ignore
-
-def escape(string: str) -> str:
-    """
-    escape: Escape special characters in a string so it can be used as a SPARQL
-    object/subject.
-
-    :param string: The string to escape.
-    :returns: The escaped string.
-    """
-    return (
-        string.replace("\"", "\\\"")
-              .replace("\n", "\\n")
-              .replace("\t", "\\t")
-    )
 
 def get_user_data() -> Set[Tuple[Graph, str]]:
     """
@@ -152,7 +148,7 @@ def get_filter(url: str) -> Graph:
           ?nextNode ?prop ?value.
         }} WHERE {{
           GRAPH <{BASE_URL}/graphs/subscriptions> {{
-            BIND(<{url}> as ?nodeShape)
+            BIND(<{escape_sparql_string(url)}> as ?nodeShape)
             ?nodeShape a sh:NodeShape.
             ?nodeShape (sh:or|sh:and|sh:not|sh:xone|sh:property|rdf:first|rdf:rest)* ?nextNode.
             ?nextNode ?prop ?value.
@@ -177,9 +173,9 @@ def send_mail(mail_html: str, email_address: str):
           GRAPH <{BASE_URL}/graphs/system/email> {{
             <{BASE_URL}/id/emails/{str(uuid.uuid4())}> a nmo:Email;
                 nmo:messageFrom "{os.environ["EMAIL_FROM"]}";
-                nmo:emailTo "{email_address}";
+                nmo:emailTo "{escape_sparql_string(email_address)}";
                 nmo:messageSubject "{os.environ["EMAIL_SUBJECT"]}";
-                nmo:htmlMessageContent "{escape(mail_html)}";
+                nmo:htmlMessageContent "{escape_sparql_string(mail_html)}";
                 nmo:sentDate "";
                 nmo:isPartOf <{BASE_URL}/id/mail-folders/2>.
           }}
