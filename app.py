@@ -3,17 +3,19 @@ app.py: entry point of the service
 """
 
 import locale
+import os
+import base64
 from typing import Dict
+from pathlib import Path
 
 from flask import Flask, Response, request
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from pyshacl import validate
-from rdflib import URIRef, Graph, DCTERMS, OWL, PROV
-from rdflib.term import Node
+from rdflib import Graph, DCTERMS, OWL, PROV
 
 from helpers import BESLUIT
 from helpers import format_date, graph_from_partial_delta, create_modified_graph
-from queries import get_content, get_user_data, send_mail, get_template_subjects
+from queries import get_content, get_user_data_list, send_mail, get_all_emails
 from queries import find_related_content
 
 locale.setlocale(locale.LC_ALL, 'nl_BE.UTF-8')
@@ -40,8 +42,8 @@ def delta_notification() -> Response:
         extract_content(delta, subjects, "inserts")
         extract_content(delta, subjects, "deletes")
 
-    # Get the data for every user
-    user_data = get_user_data()
+    # Get the data off all users
+    user_data_list = get_user_data_list()
 
     for content_url, delta in subjects.items():
         new_content = get_content(content_url)
@@ -53,15 +55,9 @@ def delta_notification() -> Response:
         intermediary = create_modified_graph(
             new_content,
             delta["inserts"],
-            False
+            add=False
         )
 
-        # Construct graphs
-        unchanged = create_modified_graph(
-            intermediary,
-            delta["deletes"],
-            False
-        )
         inserts = graph_from_partial_delta(delta["inserts"])
         deletes = graph_from_partial_delta(delta["deletes"])
 
@@ -69,28 +65,55 @@ def delta_notification() -> Response:
         old_content = create_modified_graph(
             intermediary,
             delta["deletes"],
-            True
+            add=True
         )
 
         # Check if we need to send it to someone
-        for user_filter, email in user_data:
+        for user_data in user_data_list:
+            filter_graph = user_data.filter_graph
 
             # If the user has no actual filter, skip it
-            if len(user_filter) == 0: # type: ignore
+            if len(filter_graph) == 0: # type: ignore
                 continue
 
-            if (matches(new_content, user_filter) or
-                    matches(old_content, user_filter)):
-                notify_user(
-                    new_content,
-                    unchanged,
+            if (matches(new_content, filter_graph) or
+                    matches(old_content, filter_graph)):
+
+                save_graph_to_userfile(
+                    user_data.user_url,
+                    user_data.frequency,
                     inserts,
-                    deletes,
-                    URIRef(content_url),
-                    email
+                    deletes
                 )
 
     return Response("OK")
+
+def save_graph_to_userfile(
+        user_url: str,
+        frequency: str,
+        inserted: Graph,
+        deleted: Graph
+    ):
+    """
+    save_graph_to_userfile: Save a delta to the users' file.
+
+    :param user_url: The URL of the user.
+    :param frequency: One of daily/weekly/monthly.
+    :param inserted: The graph of inserted triples.
+    :param deleted: The graph of deleted triples.
+    """
+    # TODO: Handle tuples that are inserted again after being deleted
+    base = Path(os.environ["USERFILES_DIR"])
+    base_user = base / frequency / base64.b64encode(
+        user_url.encode("UTF-8")
+    ).decode("UTF-8")
+
+    if not base_user.exists():
+        base_user.mkdir(parents=True)
+
+    inserted.serialize(destination=base_user / "inserted.ttl")
+    deleted.serialize(destination=base_user / "deleted.ttl")
+
 
 def extract_content(delta: Dict, subjects: Dict, part: str):
     """
@@ -113,56 +136,85 @@ def extract_content(delta: Dict, subjects: Dict, part: str):
 
             subjects[related_content][part] += [x]
 
-def notify_user(
-        content: Graph,
-        unchanged: Graph,
-        inserts: Graph,
-        deletes: Graph,
-        content_uri: Node,
-        email: str
-    ):
+# TODO: make this an endpoint that gets called once per day/week/month
+# Render and send email
+# Clear respective graph
+@app.route('/notify_users/<string:frequency>', methods=["POST"])
+def notify_users(
+        frequency: str,
+    ) -> Response:
     """
-    notify_user: Notify the user that a relevant content has changed
+    notify_users: Send the emails about the changed content.
 
-    :param content: The current version of the content (after the delta).
-    :param unchanged: The graph with the triples that were not affected by the
-    delta.
-    :param inserts: The graph with the triples that were added by the delta.
-    :param deletes: The graph with the triples that were deleted by the delta.
-    :param content_uri: The rdflib URI for the current content.
-    :param email: The email to which the rendered template needs to be sent.
+    :param frequency: One of "daily", "weekly" or "monthly".
+    :returns: "OK" when succesful
     """
-    subjects = get_template_subjects(content, content_uri)
+    if frequency not in ["daily", "weekly", "monthly"]:
+        return Response(f"Invalid frequency {frequency}", 400)
 
-    # Set up Jinja environment
-    env = Environment(
-        loader=FileSystemLoader("/config"),
-        autoescape=select_autoescape()
-    )
-    template = env.get_template("template.html")
+    emails = get_all_emails()
+    path = f"{os.environ['USERFILES_DIR']}/{frequency}/"
+    for user_folder_direntry in os.scandir(path):
+        if not user_folder_direntry.is_dir():
+            continue
 
-    # Render the template
-    html = template.render(
-        # Graphs
-        unchanged=unchanged,
-        inserts=inserts,
-        deletes=deletes,
+        user_folder = Path(user_folder_direntry)
 
-        # Namespaces
-        DCTERMS=DCTERMS,
-        OWL=OWL,
-        PROV=PROV,
-        BESLUIT=BESLUIT,
+        user_uri = base64.b64decode(user_folder.name).decode("UTF-8")
 
-        # Helper functions
-        format_date=format_date,
+        inserts_graph = Graph()
+        if (user_folder / "inserted.ttl").exists():
+            inserts_graph.parse(user_folder / "inserted.ttl")
 
-        # Subjects
-        **subjects
-    )
+        deletes_graph = Graph()
+        if (user_folder / "deleted.ttl").exists():
+            deletes_graph.parse(user_folder / "deleted.ttl")
 
-    # Queue for sending
-    send_mail(html, email)
+        relevant_uris = set()
+
+        # TODO: also take objects into account
+        for uri in (set(str(uri) for uri in inserts_graph.subjects())
+            | set(str(uri) for uri in deletes_graph.subjects())):
+
+            relevant_uris |= find_related_content(uri)
+
+        content_graph = Graph()
+
+        for uri in relevant_uris:
+            content_graph += get_content(uri)
+
+        unchanged_graph = content_graph - inserts_graph - deletes_graph
+
+        # Set up Jinja environment
+        env = Environment(
+            loader=FileSystemLoader("/config"),
+            autoescape=select_autoescape()
+        )
+        template = env.get_template("template.html")
+
+        # Render the template
+        # TODO: Change because much content
+        html = template.render(
+            # Graphs
+            unchanged=unchanged_graph,
+            inserts=inserts_graph,
+            deletes=deletes_graph,
+
+            # Namespaces
+            DCTERMS=DCTERMS,
+            OWL=OWL,
+            PROV=PROV,
+            BESLUIT=BESLUIT,
+
+            # Helper functions
+            format_date=format_date,
+        )
+
+        # Queue for sending
+        send_mail(html, emails[user_uri])
+        # TODO: Delete folder
+
+    return Response("OK")
 
 def matches(data: Graph, user_filter: Graph) -> bool:
     """

@@ -32,6 +32,7 @@ Then, set up the configuration files:
 - `EMAIL_FROM`: The address the email will be sent from.
 - `BASE_URL`: The base URL of the application, used for determining graph URLs.
 - `MU_SPARQL_ENDPOINT`: The endpoint the SPARQL queries should be sent to.
+- `USERFILES_DIR`: The directory the userfiles (information the user still needs to be updated about) will be saved to
 
 ### Templates
 

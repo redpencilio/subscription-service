@@ -1,11 +1,11 @@
 #!/bin/bash
 
-pylint *.py || exit 1
+python -m pylint *.py || exit 1
 
-mypy --install-types --non-interactive
-mypy --ignore-missing-imports *.py || exit 1
+python -m mypy --install-types --non-interactive
+python -m mypy --ignore-missing-imports *.py || exit 1
 
-docker build -t robbe7730/subscription-service . || exit 1
+docker build -t robbe7730/subscription . || exit 1
 
 pushd ../app-lokaalbeslist
 
