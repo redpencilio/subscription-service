@@ -5,6 +5,7 @@ app.py: entry point of the service
 import locale
 import os
 import base64
+import logging
 from typing import Dict
 from pathlib import Path
 
@@ -20,6 +21,10 @@ from queries import find_related_content
 
 locale.setlocale(locale.LC_ALL, 'nl_BE.UTF-8')
 
+LOGLEVEL = os.environ.get('LOGLEVEL', 'WARNING').upper()
+logging.basicConfig(level=LOGLEVEL)
+
+
 app = Flask(__name__)
 
 @app.route('/.mu/delta', methods=["POST"])
@@ -29,10 +34,12 @@ def delta_notification() -> Response:
 
     :returns: "OK" when succesful
     """
+    logging.info("Received delta notification")
 
     data = request.json
 
     if not data:
+        logging.info(f"Invalid data {request.data}")
         return Response("Invalid data", 400)
 
     # Get the inserts and deletes per subject
@@ -41,19 +48,23 @@ def delta_notification() -> Response:
     for delta in data:
         extract_content(delta, subjects, "inserts")
         extract_content(delta, subjects, "deletes")
+    logging.debug(f"Extracted {len(subjects)} subjects from delta")
 
     # Get the data off all users
     user_data_list = get_user_data_list()
+    logging.debug(f"Found {len(user_data_list)} user entries")
 
     for content_url, delta in subjects.items():
-        new_content = get_content(content_url)
+        post_delta_content = get_content(content_url)
 
-        if len(new_content) == 0: # type: ignore
+
+        if len(post_delta_content) == 0: # type: ignore
+            logging.debug(f"URI {content_url} has no data.")
             continue
 
         # Construct the intermediary
         intermediary = create_modified_graph(
-            new_content,
+            post_delta_content,
             delta["inserts"],
             add=False
         )
@@ -62,7 +73,7 @@ def delta_notification() -> Response:
         deletes = graph_from_partial_delta(delta["deletes"])
 
         # Construct the previous version
-        old_content = create_modified_graph(
+        pre_delta_content = create_modified_graph(
             intermediary,
             delta["deletes"],
             add=True
@@ -76,9 +87,9 @@ def delta_notification() -> Response:
             if len(filter_graph) == 0: # type: ignore
                 continue
 
-            if (matches(new_content, filter_graph) or
-                    matches(old_content, filter_graph)):
-
+            if (matches(post_delta_content, filter_graph) or
+                    matches(pre_delta_content, filter_graph)):
+                logging.info(f"Updating content for {user_data.user_url} for freq {user_data.frequency}.")
                 save_graph_to_userfile(
                     user_data.user_url,
                     user_data.frequency,
