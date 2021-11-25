@@ -13,7 +13,7 @@ from pathlib import Path
 from flask import Flask, Response, request
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from pyshacl import validate
-from rdflib import Graph, DCTERMS, OWL, PROV
+from rdflib import Graph, URIRef, DCTERMS, OWL, PROV
 
 from helpers import BESLUIT
 from helpers import format_date, graph_from_partial_delta, create_modified_graph
@@ -40,7 +40,7 @@ def delta_notification() -> Response:
     data = request.json
 
     if not data:
-        logging.info(f"Invalid data {request.data}")
+        logging.info(f"Invalid data {str(request.data)}")
         return Response("Invalid data", 400)
 
     # Get the inserts and deletes per subject
@@ -183,13 +183,11 @@ def notify_users(
         if (user_folder / "deleted.ttl").exists():
             deletes_graph.parse(user_folder / "deleted.ttl")
 
+        # Find related content (in the shape of relevant uris)
         relevant_uris = set()
-
-        # TODO: also take objects into account
-        for uri in (set(str(uri) for uri in inserts_graph.subjects())
-            | set(str(uri) for uri in deletes_graph.subjects())):
-
-            relevant_uris |= find_related_content(uri)
+        uniq = lambda l: set(str(uri) for uri in l if isinstance(uri, URIRef))
+        for uri in uniq(inserts_graph.all_nodes()) | uniq(deletes_graph.all_nodes()):
+            relevant_uris.update(find_related_content(uri))
 
         content_graph = Graph()
 
