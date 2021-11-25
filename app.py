@@ -6,6 +6,7 @@ import locale
 import os
 import base64
 import logging
+import shutil
 from typing import Dict
 from pathlib import Path
 
@@ -147,9 +148,7 @@ def extract_content(delta: Dict, subjects: Dict, part: str):
 
             subjects[related_content][part] += [x]
 
-# TODO: make this an endpoint that gets called once per day/week/month
-# Render and send email
-# Clear respective graph
+
 @app.route('/notify_users/<string:frequency>', methods=["POST"])
 def notify_users(
         frequency: str,
@@ -164,7 +163,10 @@ def notify_users(
         return Response(f"Invalid frequency {frequency}", 400)
 
     emails = get_all_emails()
-    path = f"{os.environ['USERFILES_DIR']}/{frequency}/"
+
+    path = Path(os.environ['USERFILES_DIR']) / frequency
+    path.mkdir(parents=True, exist_ok=True)
+
     for user_folder_direntry in os.scandir(path):
         if not user_folder_direntry.is_dir():
             continue
@@ -204,7 +206,6 @@ def notify_users(
         template = env.get_template("template.html")
 
         # Render the template
-        # TODO: Change because much content
         html = template.render(
             # Graphs
             unchanged=unchanged_graph,
@@ -223,7 +224,9 @@ def notify_users(
 
         # Queue for sending
         send_mail(html, emails[user_uri])
-        # TODO: Delete folder
+        
+        # Clean outbox for user
+        shutil.rmtree(user_folder_direntry)
 
     return Response("OK")
 
