@@ -7,13 +7,17 @@ import os
 import base64
 import logging
 import shutil
+import re
 from typing import Dict
 from pathlib import Path
+from datetime import datetime
 
 from flask import Flask, Response, request
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from pyshacl import validate
-from rdflib import Graph, URIRef, DCTERMS, OWL, PROV
+from rdflib import Graph, URIRef, DCTERMS, OWL, PROV, RDF, Namespace
+
+MU = Namespace("http://mu.semte.ch/vocabularies/core/")
 
 from helpers import BESLUIT
 from helpers import format_date, graph_from_partial_delta, create_modified_graph
@@ -175,6 +179,13 @@ def notify_users(
 
         user_uri = base64.b64decode(user_folder.name).decode("UTF-8")
 
+        if user_uri not in emails:
+            logging.error(f"No email for {str(user_uri)}")
+            
+            # Clean outbox for user
+            shutil.rmtree(user_folder_direntry)
+            continue
+
         inserts_graph = Graph()
         if (user_folder / "inserted.ttl").exists():
             inserts_graph.parse(user_folder / "inserted.ttl")
@@ -199,7 +210,9 @@ def notify_users(
         # Set up Jinja environment
         env = Environment(
             loader=FileSystemLoader("/config"),
-            autoescape=select_autoescape()
+            autoescape=select_autoescape(),
+            trim_blocks=True,
+            lstrip_blocks=True
         )
         template = env.get_template("template.html")
 
@@ -215,6 +228,8 @@ def notify_users(
             OWL=OWL,
             PROV=PROV,
             BESLUIT=BESLUIT,
+            RDF=RDF,
+            MU=MU,
 
             # Helper functions
             format_date=format_date,
@@ -222,6 +237,13 @@ def notify_users(
 
         # Queue for sending
         send_mail(html, emails[user_uri])
+        if (dir := os.environ.get("DEBUG_LOG_MAIL_DIR", None)) is not None:
+            pathsafe_email = re.sub('[^0-9a-zA-Z]+', '_', emails[user_uri])
+            path = Path(dir) / f"{pathsafe_email}_{datetime.now().isoformat()}.html"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            logging.debug(f"Saving mail HTML to {path}")
+            with open(path, "w") as f:
+                f.write(html)
         
         # Clean outbox for user
         shutil.rmtree(user_folder_direntry)

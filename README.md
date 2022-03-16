@@ -33,6 +33,8 @@ Then, set up the configuration files:
 - `BASE_URL`: The base URL of the application, used for determining graph URLs.
 - `MU_SPARQL_ENDPOINT`: The endpoint the SPARQL queries should be sent to.
 - `USERFILES_DIR`: The directory the userfiles (information the user still needs to be updated about) will be saved to
+- `LOGLEVEL`: Defines the log level. See <https://docs.python.org/3/howto/logging.html>
+- `DEBUG_LOG_MAIL_DIR`: If set, save sent mails to this folder as HTML
 
 ### Templates
 
