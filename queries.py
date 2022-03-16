@@ -4,11 +4,11 @@ queries: relevant SPARQL queries for this service
 
 import os
 import uuid
-from typing import Tuple, Set, Dict
+from typing import Set, Dict
+from dataclasses import dataclass
 
 from SPARQLWrapper import JSON, SPARQLWrapper
 from rdflib import Graph
-from rdflib.term import Node
 
 from helpers import graph_from_results
 from helpers import escape_sparql_string
@@ -31,7 +31,6 @@ def read_query(path: str) -> str:
         return query_file.read()
 
 GET_RELEVANT_CONTENT_QUERY = read_query("/config/get_relevant_content.sparql")
-GET_TEMPLATE_SUBJECTS = read_query("/config/get_template_subjects.sparql")
 CONSTRUCT_CONTENT_QUERY = read_query("/config/construct_content.sparql")
 
 def get_content(url: str) -> Graph:
@@ -66,28 +65,25 @@ def find_related_content(subject: str) -> Set[str]:
         for binding in data["results"]["bindings"]
     )
 
-def get_template_subjects(content: Graph, content_url: Node) -> Dict[str, Node]:
+def get_all_emails() -> Dict[str, str]:
     """
-    get_template_subjects: Query the content for relevant URLs to pass to the
-    template.
+    get_all_emails: Get the user ids and their email adresses.
 
-    :param content: The content that will be rendered.
-    :param content_url: The URL of the content itself.
-    :returns: A dict mapping names to their URI for use in the template.
+    :returns: A dict with user URIs as keys and email adresses as value.
     """
-    query_str = GET_TEMPLATE_SUBJECTS.replace(
-        "CONTENT_URL",
-        escape_sparql_string(str(content_url))
-    )
-    bindings = content.query(query_str).bindings
+    data = query(f"""
+        PREFIX ext: <http://mu.semte.ch/vocabularies/ext/>
+        PREFIX schema: <http://schema.org/>
 
-    if len(bindings) == 0:
-        return {}
-    ret = {}
-    for name, url in bindings[0].items():
-        ret[str(name)] = url
-    return ret
-
+        SELECT ?user_url ?email
+        WHERE {{
+          GRAPH <{BASE_URL}/graphs/subscriptions> {{
+            ?user_url schema:email ?email .
+          }}
+        }}
+    """, sudo=True)
+    return { binding["user_url"]["value"]: binding["email"]["value"]
+                for binding in data["results"]["bindings"] }
 
 def query(query_str: str, method: str='GET', sudo: bool=False) -> Dict:
     """
@@ -105,34 +101,46 @@ def query(query_str: str, method: str='GET', sudo: bool=False) -> Dict:
         sparql.addCustomHttpHeader("mu-auth-sudo", "true")
     return sparql.queryAndConvert() # type: ignore
 
-def get_user_data() -> Set[Tuple[Graph, str]]:
+@dataclass
+class UserData:
     """
-    get_user_data: Get all the user filters and corresponding email addresses.
+    UserData: A DataClass used in get_user_data_list.
+    """
+    filter_graph: Graph
+    user_url: str
+    frequency: str
 
-    :returns: A set of (filter graph, email address).
+def get_user_data_list() -> list[UserData]:
+    """
+    get_user_data_list: Get all the user filters along with the id of the user
+    and the frequency.
+
+    :returns: A set of UserDatas.
     """
     data = query(f"""
         PREFIX ext: <http://mu.semte.ch/vocabularies/ext/>
         PREFIX schema: <http://schema.org/>
 
         SELECT
-          ?email
           ?filter_url
+          ?user_url
+          ?frequency
         WHERE {{
           GRAPH <{BASE_URL}/graphs/subscriptions> {{
-            ?user_url ext:hasSubscription ?filter_url;
-                      schema:email ?email.
+            ?user_url ext:hasSubscription ?filter_url .
+            ?filter_url ext:subscriptionFrequency ?frequency.
           }}
         }}
     """, sudo=True)
 
-    return set(
-        (
-            get_filter(binding["filter_url"]["value"]),
-            binding["email"]["value"]
+    return [
+        UserData(
+            filter_graph = get_filter(binding["filter_url"]["value"]),
+            user_url = binding["user_url"]["value"],
+            frequency = binding["frequency"]["value"]
         )
         for binding in data["results"]["bindings"]
-    )
+    ]
 
 def get_filter(url: str) -> Graph:
     """
